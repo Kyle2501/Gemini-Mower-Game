@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Pixel Meadow - Mobile Engine</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* Prevents double-tap zoom and pull-to-refresh pull downs */
+        }
+
+        body {
+            background: #121214;
+            color: #e2e2e9;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden; /* Hard lock against native scrolling */
+            position: fixed;  /* Prevents bounce stretching on mobile browsers */
+            left: 0;
+            top: 0;
+        }
+
+        #app-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: 10px;
+        }
+
+        #game-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            background: #1c1c1f;
+            border: 3px solid #3d3d41;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        canvas {
+            display: block;
+            background: #34542d;
+            width: 100%; /* Scaling is handled responsively via wrapper */
+            height: auto;
+        }
+
+        /* Responsive Retro HUD */
+        #hud {
+            width: 100%;
+            height: 50px;
+            background: #1c1c1f;
+            border-top: 3px solid #3d3d41;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 12px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #a3a3ac;
+        }
+
+        .hud-section {
+            display: flex;
+            gap: 10px;
+        }
+
+        .stat-box {
+            background: #27272a;
+            border: 1px solid #4f4f56;
+            padding: 4px 8px;
+            border-radius: 2px;
+        }
+
+        .stat-value {
+            color: #ff6b8b;
+            font-weight: bold;
+        }
+
+        /* Touch Joystick Overlay */
+        #joystick-zone {
+            position: absolute;
+            bottom: 70px;
+            left: 30px;
+            width: 100px;
+            height: 100px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            opacity: 0.6;
+        }
+
+        #joystick-knob {
+            width: 40px;
+            height: 40px;
+            background: rgba(217, 56, 58, 0.8); /* Matches red mower color */
+            border-radius: 50%;
+            position: absolute;
+            transition: transform 0.05s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-wrapper">
+        <div id="game-container">
+            <!-- Fixed internal resolution for canvas rendering engine logic -->
+            <canvas id="gameCanvas" width="896" height="504"></canvas>
+            
+            <div id="hud">
+                <div class="hud-section">
+                    <div class="stat-box">MWR: <span class="stat-value" id="mower-status">RDY</span></div>
+                    <div class="stat-box">WEA: <span class="stat-value" id="weather-status">CALM</span></div>
+                </div>
+                <div class="hud-section">
+                    <div class="stat-box">CUT: <span class="stat-value" id="cut-percentage">0%</span></div>
+                </div>
+            </div>
+
+            <!-- On-screen joystick container inside the viewport safe-zone -->
+            <div id="joystick-zone">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('game-container');
+
+    // Grid / Map Setup (Internal virtual resolution)
+    const V_WIDTH = 896;
+    const V_HEIGHT = 504;
+    const COLS = 32;
+    const ROWS = 18;
+    const TILE_SIZE = V_WIDTH / COLS; 
+
+    let grid = [];
+    let totalGrassTiles = COLS * ROWS;
+
+    function initGrid() {
+        grid = [];
+        for (let r = 0; r < ROWS; r++) {
+            let row = [];
+            for (let c = 0; c < COLS; c++) {
+                row.push(Math.floor(Math.random() * 3) + 1); 
+            }
+            grid.push(row);
+        }
+    }
+
+    // Mower parameters using virtual scale units
+    const mower = {
+        x: V_WIDTH / 2,
+        y: V_HEIGHT / 2,
+        radius: 14,
+        speed: 3.5,
+        angle: 0,
+        targetAngle: 0,
+        colorBody: '#d9383a',
+        colorTrim: '#1a1a1a'
+    };
+
+    // Combined Keyboard and Touch Vector Input Tracking
+    const keys = {};
+    let touchInput = { active: false, dx: 0, dy: 0 };
+
+    window.addEventListener('keydown', e => keys[e.key] = true);
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    // Dynamic Mobile Layout Sizing Engine
+    function resizeGame() {
+        const paddingSpace = 20; 
+        const hudHeight = 50;
+        
+        let availableWidth = window.innerWidth - paddingSpace;
+        let availableHeight = window.innerHeight - paddingSpace - hudHeight;
+
+        // Force calculation strictly against 16:9 scale limits
+        let targetWidth = availableWidth;
+        let targetHeight = (availableWidth * 9) / 16;
+
+        if (targetHeight > availableHeight) {
+            targetHeight = availableHeight;
+            targetWidth = (availableHeight * 16) / 9;
+        }
+
+        container.style.width = `${targetWidth}px`;
+    }
+    window.addEventListener('resize', resizeGame);
+    window.addEventListener('orientationchange', () => setTimeout(resizeGame, 200));
+
+    // Touch Virtual Joystick Logic
+    const joystickZone = document.getElementById('joystick-zone');
+    const joystickKnob = document.getElementById('joystick-knob');
+    const maxLeash = 40; // Max pixels knob can drift from center
+    let joystickCenter = { x: 0, y: 0 };
+
+    joystickZone.addEventListener('touchstart', e => {
+        touchInput.active = true;
+        const rect = joystickZone.getBoundingClientRect();
+        joystickCenter = {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+        };
+        handleTouchMove(e.targetTouches[0]);
+    });
+
+    joystickZone.addEventListener('touchmove', e => {
+        if (!touchInput.active) return;
+        handleTouchMove(e.targetTouches[0]);
+    });
+
+    joystickZone.addEventListener('touchend', () => {
+        touchInput.active = false;
+        touchInput.dx = 0;
+        touchInput.dy = 0;
+        joystickKnob.style.transform = `translate(0px, 0px)`;
+    });
+
+    function handleTouchMove(touch) {
+        let rawDx = touch.clientX - joystickCenter.x;
+        let rawDy = touch.clientY - joystickCenter.y;
+        let distance = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+
+        if (distance > maxLeash) {
+            rawDx = (rawDx / distance) * maxLeash;
+            rawDy = (rawDy / distance) * maxLeash;
+            distance = maxLeash;
+        }
+
+        joystickKnob.style.transform = `translate(${rawDx}px, ${rawDy}px)`;
+
+        // Normalize vectors into safe -1 to 1 movement values
+        touchInput.dx = rawDx / maxLeash;
+        touchInput.dy = rawDy / maxLeash;
+    }
+
+    function processMovementAndInput() {
+        let moveX = 0;
+        let moveY = 0;
+
+        // Pull inputs from keyboard setups if active
+        if (keys['ArrowUp'] || keys['w']) moveY = -1;
+        if (keys['ArrowDown'] || keys['s']) moveY = 1;
+        if (keys['ArrowLeft'] || keys['a']) moveX = -1;
+        if (keys['ArrowRight'] || keys['d']) moveX = 1;
+
+        // Override with touch joysticks vectors if touched
+        if (touchInput.active) {
+            moveX = touchInput.dx;
+            moveY = touchInput.dy;
+        }
+
+        if (Math.abs(moveX) > 0.1 || Math.abs(moveY) > 0.1) {
+            mower.targetAngle = Math.atan2(moveY, moveX);
+            
+            let angleDiff = mower.targetAngle - mower.angle;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            mower.angle += angleDiff * 0.2;
+
+            mower.x += moveX * mower.speed;
+            mower.y += moveY * mower.speed;
+
+            mower.x = Math.max(mower.radius, Math.min(V_WIDTH - mower.radius, mower.x));
+            mower.y = Math.max(mower.radius, Math.min(V_HEIGHT - mower.radius, mower.y));
+
+            checkGrassCut();
+        }
+    }
+
+    function checkGrassCut() {
+        const col = Math.floor(mower.x / TILE_SIZE);
+        const row = Math.floor(mower.y / TILE_SIZE);
+
+        if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+            if (grid[row][col] > 0) {
+                grid[row][col] = 0; 
+                updateMetrics();
+            }
+        }
+    }
+
+    function updateMetrics() {
+        let currentCut = 0;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c] === 0) currentCut++;
+            }
+        }
+        const pct = Math.floor((currentCut / totalGrassTiles) * 100);
+        document.getElementById('cut-percentage').innerText = `${pct}%`;
+    }
+
+    function drawGrass() {
+        const grassColors = {
+            0: '#4d6e42', 
+            1: '#3d5e33', 
+            2: '#34542d', 
+            3: '#284422'  
+        };
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                ctx.fillStyle = grassColors[grid[r][c]];
+                ctx.fillRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE - 0.5, TILE_SIZE - 0.5);
+            }
+        }
+    }
+
+    function drawMower() {
+        ctx.save();
+        ctx.translate(mower.x, mower.y);
+        ctx.rotate(mower.angle);
+
+        ctx.fillStyle = mower.colorTrim;
+        ctx.fillRect(-16, -12, 32, 24);
+
+        ctx.fillStyle = mower.colorBody;
+        ctx.fillRect(-10, -9, 20, 18);
+
+        ctx.strokeStyle = '#71717a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-16, -8);
+        ctx.lineTo(-24, -8);
+        ctx.moveTo(-16, 8);
+        ctx.lineTo(-24, 8);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function loop() {
+        ctx.clearRect(0, 0, V_WIDTH, V_HEIGHT);
+        
+        processMovementAndInput();
+        drawGrass();
+        drawMower();
+
+        requestAnimationFrame(loop);
+    }
+
+    // Launch Sequence
+    initGrid();
+    resizeGame();
+    loop();
+</script>
+
+</body>
+  </html>
+  
