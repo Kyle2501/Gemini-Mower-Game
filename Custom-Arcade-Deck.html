@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Pixel Meadow - Custom Arcade Deck</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        body {
+            background: #121214;
+            color: #e2e2e9;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            position: fixed;
+        }
+
+        #console-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            max-width: 500px;
+            background: #222225;
+            border-left: 4px solid #3f3f46;
+            border-right: 4px solid #18181b;
+        }
+
+        /* Top 2/3: Screen Viewport */
+        #screen-area {
+            height: 66.66vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #0f0f11;
+            padding: 12px;
+            box-shadow: inset 0 -10px 20px rgba(0,0,0,0.5);
+        }
+
+        #canvas-wrapper {
+            width: 100%;
+            position: relative;
+            background: #1c1c1f;
+            border: 4px solid #3d3d41;
+        }
+
+        canvas {
+            display: block;
+            background: #34542d;
+            width: 100%;
+            height: auto;
+        }
+
+        #hud {
+            width: 100%;
+            height: 40px;
+            background: #1c1c1f;
+            border-top: 3px solid #3d3d41;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #a3a3ac;
+        }
+
+        .stat-box {
+            background: #27272a;
+            border: 1px solid #4f4f56;
+            padding: 2px 6px;
+        }
+
+        .stat-value {
+            color: #ff6b8b;
+            font-weight: bold;
+        }
+
+        /* Bottom 1/3: Custom Symmetric Input Faceplate */
+        #controller-area {
+            height: 33.33vh;
+            background: #2a2a30;
+            border-top: 6px solid #141416;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            position: relative;
+            box-shadow: inset 0 10px 15px rgba(255,255,255,0.05);
+        }
+
+        /* Left Side: Sega Genesis-style 3-Button Layout Cluster */
+        #sega-buttons {
+            display: flex;
+            gap: 12px;
+            transform: rotate(-10deg); /* Retro sloped alignment */
+            align-items: center;
+            width: 40%;
+            justify-content: center;
+        }
+
+        .sega-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: #222;
+            border: 3px solid #444;
+            box-shadow: -2px 3px 0 #111, 0 4px 5px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            color: #fff;
+            position: relative;
+        }
+        
+        /* Individual button face accents */
+        #btn-a { border-color: #ff3344; color: #ff3344; } /* Red accent */
+        #btn-b { border-color: #3388ff; color: #3388ff; } /* Blue accent */
+        #btn-c { border-color: #33cc66; color: #33cc66; } /* Green accent */
+
+        .sega-btn:active {
+            transform: translate(-1px, 2px);
+            box-shadow: -1px 1px 0 #111;
+            background: #333;
+        }
+
+        /* Center Grid Setup: Mario Kart Tour Floating-Style Analog Joystick */
+        #joystick-wrapper {
+            width: 45%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #joystick-zone {
+            width: 110px;
+            height: 110px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 3px solid #18181b;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 4px 8px rgba(0,0,0,0.5);
+        }
+
+        #joystick-knob {
+            width: 46px;
+            height: 46px;
+            background: #d9383a;
+            border: 3px solid #1a1a1a;
+            border-radius: 50%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+            position: absolute;
+            transition: transform 0.04s ease;
+        }
+
+        /* Balancing Spacer on Right Side to frame the screen geometry */
+        #right-spacer {
+            width: 15%;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="console-container">
+        
+        <div id="screen-area">
+            <div id="canvas-wrapper">
+                <canvas id="gameCanvas" width="896" height="504"></canvas>
+                <div id="hud">
+                    <div class="stat-box">MWR: <span class="stat-value">DRIVE</span></div>
+                    <div class="stat-box">CUT: <span class="stat-value" id="cut-percentage">0%</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="controller-area">
+            
+            <div id="sega-buttons">
+                <div id="btn-a" class="sega-btn">A</div>
+                <div id="btn-b" class="sega-btn">B</div>
+                <div id="btn-c" class="sega-btn">C</div>
+            </div>
+
+            <div id="joystick-wrapper">
+                <div id="joystick-zone">
+                    <div id="joystick-knob"></div>
+                </div>
+            </div>
+
+            <div id="right-spacer"></div>
+
+        </div>
+
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const V_WIDTH = 896;
+    const V_HEIGHT = 504;
+    const COLS = 32;
+    const ROWS = 18;
+    const TILE_SIZE = V_WIDTH / COLS;
+
+    let grid = [];
+    let totalGrassTiles = COLS * ROWS;
+
+    function initGrid() {
+        grid = [];
+        for (let r = 0; r < ROWS; r++) {
+            let row = [];
+            for (let c = 0; c < COLS; c++) {
+                row.push(Math.floor(Math.random() * 3) + 1);
+            }
+            grid.push(row);
+        }
+    }
+
+    const mower = {
+        x: V_WIDTH / 2,
+        y: V_HEIGHT / 2,
+        radius: 14,
+        speed: 4,
+        angle: 0,
+        targetAngle: 0,
+        colorBody: '#d9383a',
+        colorTrim: '#1a1a1a'
+    };
+
+    // Input States
+    const keys = {};
+    let touchInput = { active: false, dx: 0, dy: 0 };
+
+    // Keyboard Fallbacks
+    window.addEventListener('keydown', e => keys[e.key] = true);
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    // Sega Button Dummy Target Click Actions
+    const bindActionButton = (id) => {
+        const btn = document.getElementById(id);
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); });
+    };
+    bindActionButton('btn-a');
+    bindActionButton('btn-b');
+    bindActionButton('btn-c');
+
+    // Central Joystick Input Handlers
+    const joystickZone = document.getElementById('joystick-zone');
+    const joystickKnob = document.getElementById('joystick-knob');
+    const maxLeash = 42; 
+    let joystickCenter = { x: 0, y: 0 };
+
+    joystickZone.addEventListener('touchstart', e => {
+        e.preventDefault();
+        touchInput.active = true;
+        const rect = joystickZone.getBoundingClientRect();
+        joystickCenter = {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+        };
+        handleJoystickMove(e.targetTouches[0]);
+    });
+
+    joystickZone.addEventListener('touchmove', e => {
+        e.preventDefault();
+        if (!touchInput.active) return;
+        handleJoystickMove(e.targetTouches[0]);
+    });
+
+    joystickZone.addEventListener('touchend', e => {
+        e.preventDefault();
+        touchInput.active = false;
+        touchInput.dx = 0;
+        touchInput.dy = 0;
+        joystickKnob.style.transform = `translate(0px, 0px)`;
+    });
+
+    function handleJoystickMove(touch) {
+        let rawDx = touch.clientX - joystickCenter.x;
+        let rawDy = touch.clientY - joystickCenter.y;
+        let distance = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+
+        if (distance > maxLeash) {
+            rawDx = (rawDx / distance) * maxLeash;
+            rawDy = (rawDy / distance) * maxLeash;
+            distance = maxLeash;
+        }
+
+        joystickKnob.style.transform = `translate(${rawDx}px, ${rawDy}px)`;
+
+        // Pass normalized structural direction vector downstream
+        touchInput.dx = rawDx / maxLeash;
+        touchInput.dy = rawDy / maxLeash;
+    }
+
+    function calculateSystemVectors() {
+        let dx = 0;
+        let dy = 0;
+
+        if (keys['ArrowUp'] || keys['w']) dy = -1;
+        if (keys['ArrowDown'] || keys['s']) dy = 1;
+        if (keys['ArrowLeft'] || keys['a']) dx = -1;
+        if (keys['ArrowRight'] || keys['d']) dx = 1;
+
+        if (touchInput.active) {
+            dx = touchInput.dx;
+            dy = touchInput.dy;
+        }
+
+        if (Math.abs(dx) > 0.08 || Math.abs(dy) > 0.08) {
+            mower.targetAngle = Math.atan2(dy, dx);
+            
+            let angleDiff = mower.targetAngle - mower.angle;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            mower.angle += angleDiff * 0.22; 
+
+            mower.x += dx * mower.speed;
+            mower.y += dy * mower.speed;
+
+            mower.x = Math.max(mower.radius, Math.min(V_WIDTH - mower.radius, mower.x));
+            mower.y = Math.max(mower.radius, Math.min(V_HEIGHT - mower.radius, mower.y));
+
+            checkGrassCut();
+        }
+    }
+
+    function checkGrassCut() {
+        const col = Math.floor(mower.x / TILE_SIZE);
+        const row = Math.floor(mower.y / TILE_SIZE);
+
+        if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+            if (grid[row][col] > 0) {
+                grid[row][col] = 0;
+                updateMetrics();
+            }
+        }
+    }
+
+    function updateMetrics() {
+        let currentCut = 0;
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c] === 0) currentCut++;
+            }
+        }
+        const pct = Math.floor((currentCut / totalGrassTiles) * 100);
+        document.getElementById('cut-percentage').innerText = `${pct}%`;
+    }
+
+    function drawGrass() {
+        const grassColors = {
+            0: '#4d6e42', 
+            1: '#3d5e33', 
+            2: '#34542d', 
+            3: '#284422'  
+        };
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                ctx.fillStyle = grassColors[grid[r][c]];
+                ctx.fillRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE - 0.5, TILE_SIZE - 0.5);
+            }
+        }
+    }
+
+    function drawMower() {
+        ctx.save();
+        ctx.translate(mower.x, mower.y);
+        ctx.rotate(mower.angle);
+
+        ctx.fillStyle = mower.colorTrim;
+        ctx.fillRect(-16, -12, 32, 24);
+
+        ctx.fillStyle = mower.colorBody;
+        ctx.fillRect(-10, -9, 20, 18);
+
+        ctx.strokeStyle = '#71717a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-16, -8);
+        ctx.lineTo(-24, -8);
+        ctx.moveTo(-16, 8);
+        ctx.lineTo(-24, 8);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function loop() {
+        ctx.clearRect(0, 0, V_WIDTH, V_HEIGHT);
+        
+        calculateSystemVectors();
+        drawGrass();
+        drawMower();
+
+        requestAnimationFrame(loop);
+    }
+
+    initGrid();
+    loop();
+</script>
+</body>
+</html>
